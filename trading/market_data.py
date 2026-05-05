@@ -1,9 +1,10 @@
+import asyncio
+import time
 import aiohttp
 import pandas as pd
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
-# Mapa símbolo → ID de CoinGecko
 SYMBOL_TO_CG: dict[str, str] = {
     "BTC":   "bitcoin",
     "ETH":   "ethereum",
@@ -29,24 +30,78 @@ SYMBOL_TO_CG: dict[str, str] = {
 
 _INTERVAL_DAYS = {"15m": 2, "1h": 14, "4h": 60, "1d": 365}
 
+# ── Caché de precios (TTL 20s) ─────────────────────────────────────────────────
+_price_cache: dict[str, tuple[float, float]] = {}   # cg_id -> (price, timestamp)
+CACHE_TTL = 20
+
 
 def _cg_id(symbol: str) -> str:
     return SYMBOL_TO_CG.get(symbol.upper(), symbol.lower())
 
 
-async def _get(url: str, params: dict | None = None):
-    timeout = aiohttp.ClientTimeout(total=15)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url, params=params) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+# ── HTTP con reintentos en 429 ─────────────────────────────────────────────────
 
+async def _get(url: str, params: dict | None = None) -> dict | list:
+    timeout = aiohttp.ClientTimeout(total=15)
+    for attempt in range(4):
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, params=params) as resp:
+                if resp.status == 429:
+                    wait = 2 ** attempt          # 1s, 2s, 4s, 8s
+                    await asyncio.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                return await resp.json()
+    raise RuntimeError("CoinGecko: demasiadas peticiones, intenta en unos segundos.")
+
+
+# ── Precio individual (con caché) ──────────────────────────────────────────────
 
 async def get_price(symbol: str, quote: str = "USDT") -> float:
     cg_id = _cg_id(symbol)
-    data = await _get(f"{COINGECKO_BASE}/simple/price", {"ids": cg_id, "vs_currencies": "usd"})
-    return float(data[cg_id]["usd"])
+    now = time.monotonic()
 
+    if cg_id in _price_cache:
+        price, ts = _price_cache[cg_id]
+        if now - ts < CACHE_TTL:
+            return price
+
+    data = await _get(f"{COINGECKO_BASE}/simple/price", {"ids": cg_id, "vs_currencies": "usd"})
+    price = float(data[cg_id]["usd"])
+    _price_cache[cg_id] = (price, now)
+    return price
+
+
+# ── Precios en batch (una sola llamada para varios símbolos) ───────────────────
+
+async def get_prices_batch(symbols: list[str]) -> dict[str, float]:
+    now = time.monotonic()
+    result: dict[str, float] = {}
+    to_fetch: list[str] = []
+
+    for sym in symbols:
+        cg_id = _cg_id(sym)
+        if cg_id in _price_cache:
+            price, ts = _price_cache[cg_id]
+            if now - ts < CACHE_TTL:
+                result[sym] = price
+                continue
+        to_fetch.append(sym)
+
+    if to_fetch:
+        ids = ",".join(_cg_id(s) for s in to_fetch)
+        data = await _get(f"{COINGECKO_BASE}/simple/price", {"ids": ids, "vs_currencies": "usd"})
+        for sym in to_fetch:
+            cg_id = _cg_id(sym)
+            if cg_id in data:
+                price = float(data[cg_id]["usd"])
+                _price_cache[cg_id] = (price, now)
+                result[sym] = price
+
+    return result
+
+
+# ── Stats 24h ─────────────────────────────────────────────────────────────────
 
 async def get_ticker_24h(symbol: str, quote: str = "USDT") -> dict:
     cg_id = _cg_id(symbol)
@@ -55,8 +110,10 @@ async def get_ticker_24h(symbol: str, quote: str = "USDT") -> dict:
         {"vs_currency": "usd", "ids": cg_id, "price_change_percentage": "24h"},
     )
     c = data[0]
+    price = float(c["current_price"] or 0)
+    _price_cache[cg_id] = (price, time.monotonic())
     return {
-        "price":        float(c["current_price"] or 0),
+        "price":        price,
         "change_pct":   float(c.get("price_change_percentage_24h") or 0),
         "change":       float(c.get("price_change_24h") or 0),
         "high":         float(c.get("high_24h") or 0),
@@ -65,6 +122,8 @@ async def get_ticker_24h(symbol: str, quote: str = "USDT") -> dict:
         "quote_volume": float(c.get("total_volume") or 0),
     }
 
+
+# ── OHLCV ────────────────────────────────────────────────────────────────────
 
 async def get_klines(
     symbol: str,
@@ -80,7 +139,7 @@ async def get_klines(
         {"vs_currency": "usd", "days": days},
     )
 
-    prices  = data["prices"]          # [[ts_ms, price], ...]
+    prices  = data["prices"]
     volumes = dict(data.get("total_volumes", []))
 
     df = pd.DataFrame(prices, columns=["timestamp", "close"])
@@ -90,7 +149,6 @@ async def get_klines(
     df["low"]    = df["close"]
     df["volume"] = df["timestamp"].map(volumes).fillna(0).astype(float)
 
-    # Resample to coarser intervals
     if interval in ("4h", "1d"):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         rule = "4h" if interval == "4h" else "1D"

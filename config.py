@@ -17,7 +17,7 @@ TRADING_MODE = os.getenv("TRADING_MODE", "paper")      # "paper" | "live"
 USE_TESTNET = os.getenv("USE_TESTNET", "false").lower() == "true"
 QUOTE_CURRENCY = os.getenv("QUOTE_CURRENCY", "USDT")
 
-ALERT_CHECK_INTERVAL = int(os.getenv("ALERT_CHECK_INTERVAL", "30"))
+ALERT_CHECK_INTERVAL = int(os.getenv("ALERT_CHECK_INTERVAL", "60"))
 SIGNAL_SCAN_INTERVAL = int(os.getenv("SIGNAL_SCAN_INTERVAL", "300"))
 
 WATCHLIST_DEFAULT: list[str] = [
