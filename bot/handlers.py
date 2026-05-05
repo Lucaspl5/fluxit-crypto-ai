@@ -6,33 +6,35 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from config import ALLOWED_USERS, TRADING_MODE, QUOTE_CURRENCY, WATCHLIST_DEFAULT
+from config import TELEGRAM_CHAT_ID, TRADING_MODE, QUOTE_CURRENCY, WATCHLIST_DEFAULT
 from database.db import (
     add_alert, get_alerts, delete_alert,
     add_to_watchlist, remove_from_watchlist, get_watchlist,
     get_paper_balance, update_paper_balance, add_paper_trade, get_paper_portfolio,
+    add_sl_tp_order, get_sl_tp_orders_by_user, cancel_sl_tp_order,
 )
 from trading.binance_client import get_ticker_24h, get_price, place_market_order, get_account_balance
 from trading.analysis import get_analysis
 from trading.signals import generate_signal, scan_watchlist
-from bot.keyboards import confirm_order_keyboard, analysis_interval_keyboard, delete_alert_keyboard
+from bot.keyboards import confirm_order_keyboard, analysis_interval_keyboard, delete_alert_keyboard, cancel_sltp_keyboard
 from bot.messages import format_price, format_analysis, format_signal, format_portfolio
 
 logger = logging.getLogger(__name__)
 
-# ── Auth decorator ─────────────────────────────────────────────────────────────
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
 
 def auth_required(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if ALLOWED_USERS and update.effective_user.id not in ALLOWED_USERS:
+        if TELEGRAM_CHAT_ID and update.effective_user.id != TELEGRAM_CHAT_ID:
             await update.message.reply_text("⛔ No autorizado.")
             return
         return await func(update, context)
     return wrapper
 
 
-# ── Pending orders (in-memory store, keyed by short UUID) ─────────────────────
+# ── Pending orders store ───────────────────────────────────────────────────────
 
 def _store_order(context: ContextTypes.DEFAULT_TYPE, payload: dict) -> str:
     order_id = uuid.uuid4().hex[:8]
@@ -47,23 +49,25 @@ def _pop_order(context: ContextTypes.DEFAULT_TYPE, order_id: str) -> dict | None
 # ── /start ─────────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if ALLOWED_USERS and update.effective_user.id not in ALLOWED_USERS:
+    if TELEGRAM_CHAT_ID and update.effective_user.id != TELEGRAM_CHAT_ID:
         await update.message.reply_text("⛔ No autorizado.")
         return
     mode_label = "📄 Paper Trading" if TRADING_MODE == "paper" else "⚡ Live Trading"
     text = (
         "🤖 *FluxIT Crypto Bot*\n\n"
         "💰 `/precio BTC` — Precio y stats 24h\n"
-        "📊 `/analisis BTC` — Análisis técnico (RSI, MACD, BB)\n"
-        "📡 `/senales` — Señales del mercado en tu watchlist\n"
-        "🔔 `/alerta BTC 50000 above` — Crear alerta de precio\n"
-        "📋 `/alertas` — Ver y eliminar alertas activas\n"
+        "📊 `/analisis BTC` — Análisis técnico\n"
+        "📡 `/senales` — Señales del mercado\n"
+        "🔔 `/alerta BTC 50000 above` — Alerta de precio\n"
+        "📋 `/alertas` — Ver alertas activas\n"
         "👁 `/watchlist` — Gestionar watchlist\n"
-        "💼 `/portfolio` — Ver posiciones y valor\n"
+        "💼 `/portfolio` — Ver posiciones\n"
         "💳 `/balance` — Balance de cuenta\n"
         "🟢 `/comprar BTC 100` — Comprar con 100 USDT\n"
-        "🔴 `/vender BTC 0.001` — Vender cantidad\n\n"
-        f"Modo actual: *{mode_label}*"
+        "       _Opciones: `sl=45000 tp=55000`_\n"
+        "🔴 `/vender BTC 0.001` — Vender cantidad\n"
+        "📌 `/posiciones` — Ver órdenes SL/TP activas\n\n"
+        f"Modo: *{mode_label}*"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -123,7 +127,7 @@ async def cmd_add_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     direction = context.args[2].lower()
     if direction not in ("above", "below"):
-        await update.message.reply_text("❌ Dirección debe ser `above` o `below`.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ Usa `above` o `below`.", parse_mode=ParseMode.MARKDOWN)
         return
     add_alert(update.effective_user.id, symbol, target, direction)
     verb = "suba por encima" if direction == "above" else "baje por debajo"
@@ -137,8 +141,7 @@ async def cmd_add_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @auth_required
 async def cmd_list_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    alerts = get_alerts(user_id=user_id, active_only=True)
+    alerts = get_alerts(user_id=update.effective_user.id, active_only=True)
     if not alerts:
         await update.message.reply_text("No tienes alertas activas.")
         return
@@ -174,28 +177,23 @@ async def cmd_signals(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @auth_required
 async def cmd_watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
     if context.args:
         action = context.args[0].lower()
         if action in ("add", "agregar") and len(context.args) > 1:
             symbol = context.args[1].upper().removesuffix("USDT")
-            if add_to_watchlist(user_id, symbol):
-                await update.message.reply_text(f"✅ *{symbol}* añadido a tu watchlist.", parse_mode=ParseMode.MARKDOWN)
-            else:
-                await update.message.reply_text(f"*{symbol}* ya está en tu watchlist.", parse_mode=ParseMode.MARKDOWN)
+            add_to_watchlist(user_id, symbol)
+            await update.message.reply_text(f"✅ *{symbol}* añadido.", parse_mode=ParseMode.MARKDOWN)
             return
         if action in ("remove", "eliminar") and len(context.args) > 1:
             symbol = context.args[1].upper().removesuffix("USDT")
             remove_from_watchlist(user_id, symbol)
-            await update.message.reply_text(f"❌ *{symbol}* eliminado de tu watchlist.", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"❌ *{symbol}* eliminado.", parse_mode=ParseMode.MARKDOWN)
             return
 
     wl = get_watchlist(user_id)
     if not wl:
         await update.message.reply_text(
-            "Tu watchlist está vacía.\n"
-            "Añade: `/watchlist add BTC`\n"
-            "Elimina: `/watchlist remove BTC`",
+            "Tu watchlist está vacía.\n`/watchlist add BTC` para añadir.",
             parse_mode=ParseMode.MARKDOWN,
         )
     else:
@@ -220,8 +218,7 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 prices[sym] = 0.0
         await update.message.reply_text(
-            format_portfolio(portfolio, prices, usdt),
-            parse_mode=ParseMode.MARKDOWN,
+            format_portfolio(portfolio, prices, usdt), parse_mode=ParseMode.MARKDOWN
         )
     else:
         try:
@@ -269,10 +266,30 @@ async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── /comprar ───────────────────────────────────────────────────────────────────
 
+def _parse_sl_tp(args: list[str]) -> tuple[float | None, float | None]:
+    """Extract sl=X and tp=X from args list."""
+    sl = tp = None
+    for arg in args:
+        if arg.lower().startswith("sl="):
+            try:
+                sl = float(arg.split("=")[1])
+            except ValueError:
+                pass
+        elif arg.lower().startswith("tp="):
+            try:
+                tp = float(arg.split("=")[1])
+            except ValueError:
+                pass
+    return sl, tp
+
+
 @auth_required
 async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
-        await update.message.reply_text("Uso: `/comprar BTC 100` (gasta 100 USDT)", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            "Uso: `/comprar BTC 100`\nOpcional: `/comprar BTC 100 sl=45000 tp=55000`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return
     symbol = context.args[0].upper().removesuffix("USDT")
     try:
@@ -283,21 +300,39 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if amount_usdt <= 0:
         await update.message.reply_text("❌ El monto debe ser positivo.")
         return
+
+    sl, tp = _parse_sl_tp(context.args[2:])
+
     try:
         price = await get_price(symbol, quote=QUOTE_CURRENCY)
         qty = amount_usdt / price
+
+        # Validate SL/TP
+        if sl and sl >= price:
+            await update.message.reply_text(f"❌ El Stop Loss (`${sl:,.4f}`) debe estar por debajo del precio actual (`${price:,.4f}`).", parse_mode=ParseMode.MARKDOWN)
+            return
+        if tp and tp <= price:
+            await update.message.reply_text(f"❌ El Take Profit (`${tp:,.4f}`) debe estar por encima del precio actual (`${price:,.4f}`).", parse_mode=ParseMode.MARKDOWN)
+            return
+
         order_id = _store_order(context, {
             "side": "BUY", "symbol": symbol,
             "amount_usdt": amount_usdt, "quantity": qty,
             "user_id": update.effective_user.id,
+            "sl": sl, "tp": tp,
         })
+
+        sl_line = f"\n🛑 Stop Loss: `${sl:,.4f}`" if sl else ""
+        tp_line = f"\n✅ Take Profit: `${tp:,.4f}`" if tp else ""
         mode_label = "📄 Paper Trading" if TRADING_MODE == "paper" else "⚡ LIVE TRADING"
+
         await update.message.reply_text(
             f"⚠️ *Confirmar compra*\n\n"
             f"Par: *{symbol}/USDT*\n"
             f"Precio: `${price:,.4f}`\n"
             f"Gasto: `${amount_usdt:,.2f} USDT`\n"
-            f"Recibes ≈ `{qty:.6f} {symbol}`\n\n"
+            f"Recibes ≈ `{qty:.6f} {symbol}`"
+            f"{sl_line}{tp_line}\n\n"
             f"Modo: *{mode_label}*",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=confirm_order_keyboard(order_id),
@@ -322,6 +357,7 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if quantity <= 0:
         await update.message.reply_text("❌ La cantidad debe ser positiva.")
         return
+
     try:
         price = await get_price(symbol, quote=QUOTE_CURRENCY)
         value = quantity * price
@@ -329,6 +365,7 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "side": "SELL", "symbol": symbol,
             "quantity": quantity, "amount_usdt": value,
             "user_id": update.effective_user.id,
+            "sl": None, "tp": None,
         })
         mode_label = "📄 Paper Trading" if TRADING_MODE == "paper" else "⚡ LIVE TRADING"
         await update.message.reply_text(
@@ -345,32 +382,57 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
 
 
-# ── Callback query handler ─────────────────────────────────────────────────────
+# ── /posiciones ────────────────────────────────────────────────────────────────
+
+@auth_required
+async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    orders = get_sl_tp_orders_by_user(user_id)
+    if not orders:
+        await update.message.reply_text("No tienes órdenes SL/TP activas.")
+        return
+    for order in orders:
+        sl_str = f"🛑 SL: `${order['stop_loss']:,.4f}`" if order["stop_loss"] else "🛑 SL: —"
+        tp_str = f"✅ TP: `${order['take_profit']:,.4f}`" if order["take_profit"] else "✅ TP: —"
+        await update.message.reply_text(
+            f"📌 *{order['symbol']}/USDT* `[{order['id']}]`\n"
+            f"Cantidad: `{order['quantity']:.6f}`\n"
+            f"Entrada: `${order['entry_price']:,.4f}`\n"
+            f"{sl_str}\n{tp_str}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=cancel_sltp_keyboard(order["id"]),
+        )
+
+
+# ── Callbacks ──────────────────────────────────────────────────────────────────
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
 
-    if ALLOWED_USERS and user_id not in ALLOWED_USERS:
+    if TELEGRAM_CHAT_ID and user_id != TELEGRAM_CHAT_ID:
         await query.answer("⛔ No autorizado.")
         return
 
     await query.answer()
     data = query.data
 
-    # ── Cancel order
     if data == "cancel_order":
         await query.edit_message_text("❌ Orden cancelada.")
         return
 
-    # ── Delete alert
     if data.startswith("delete_alert_"):
         alert_id = int(data.removeprefix("delete_alert_"))
         delete_alert(alert_id, user_id)
         await query.edit_message_text("🗑 Alerta eliminada.")
         return
 
-    # ── Change analysis interval
+    if data.startswith("cancel_sltp_"):
+        order_id = int(data.removeprefix("cancel_sltp_"))
+        cancel_sl_tp_order(order_id, user_id)
+        await query.edit_message_text("🗑 Orden SL/TP cancelada.")
+        return
+
     if data.startswith("analysis_"):
         _, symbol, interval = data.split("_", 2)
         try:
@@ -384,7 +446,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"❌ Error: {e}")
         return
 
-    # ── Confirm order
     if data.startswith("confirm_"):
         order_id = data.removeprefix("confirm_")
         order = _pop_order(context, order_id)
@@ -394,21 +455,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if order["user_id"] != user_id:
             await query.edit_message_text("⛔ No autorizado.")
             return
-
-        symbol = order["symbol"]
-        side = order["side"]
-
         if TRADING_MODE == "paper":
-            await _execute_paper_order(query, context, order)
+            await _execute_paper_order(query, order)
         else:
             await _execute_live_order(query, order)
-        return
 
 
-async def _execute_paper_order(query, context, order: dict) -> None:
+async def _execute_paper_order(query, order: dict) -> None:
     user_id = order["user_id"]
     symbol = order["symbol"]
     side = order["side"]
+    sl = order.get("sl")
+    tp = order.get("tp")
 
     try:
         price = await get_price(symbol, quote=QUOTE_CURRENCY)
@@ -421,17 +479,25 @@ async def _execute_paper_order(query, context, order: dict) -> None:
         balance = get_paper_balance(user_id)
         if balance < amount:
             await query.edit_message_text(
-                f"❌ Saldo insuficiente.\nTienes `${balance:,.2f} USDT` y necesitas `${amount:,.2f}`.",
+                f"❌ Saldo insuficiente.\nTienes `${balance:,.2f} USDT`.",
                 parse_mode=ParseMode.MARKDOWN,
             )
             return
         qty = amount / price
         update_paper_balance(user_id, balance - amount)
         add_paper_trade(user_id, symbol, "BUY", qty, price)
+
+        # Register SL/TP if set
+        sltp_line = ""
+        if sl or tp:
+            add_sl_tp_order(user_id, symbol, qty, price, sl, tp)
+            sltp_line = "\n📌 _Orden SL/TP registrada y activa._"
+
         await query.edit_message_text(
             f"✅ *Compra ejecutada (Paper)*\n"
             f"Compraste `{qty:.6f} {symbol}` a `${price:,.4f}`\n"
-            f"Total: `${amount:,.2f} USDT` debitados",
+            f"Total: `${amount:,.2f} USDT` debitados"
+            f"{sltp_line}",
             parse_mode=ParseMode.MARKDOWN,
         )
     else:
@@ -440,7 +506,7 @@ async def _execute_paper_order(query, context, order: dict) -> None:
         available = portfolio.get(symbol, 0.0)
         if available < qty:
             await query.edit_message_text(
-                f"❌ Saldo insuficiente.\nTienes `{available:.6f} {symbol}` y quieres vender `{qty:.6f}`.",
+                f"❌ Solo tienes `{available:.6f} {symbol}`.",
                 parse_mode=ParseMode.MARKDOWN,
             )
             return

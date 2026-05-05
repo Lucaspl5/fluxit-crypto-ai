@@ -5,3 +5,4 @@ numpy>=1.26.0
 pandas>=2.0.0
 pandas-ta>=0.3.14b0
 aiohttp>=3.9.0
+psycopg2-binary>=2.9.9
