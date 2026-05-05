@@ -1,11 +1,17 @@
-import pandas as pd
+# Binance client — solo para live trading (órdenes reales)
+# Los datos de mercado (precios, OHLCV) usan CoinGecko via trading/market_data.py
+# porque Binance bloquea IPs de Railway por restricción geográfica.
+
 from binance import AsyncClient
 from config import BINANCE_API_KEY, BINANCE_API_SECRET, USE_TESTNET
+
+# Re-exportamos las funciones de datos desde market_data para compatibilidad
+from trading.market_data import get_price, get_ticker_24h, get_klines  # noqa: F401
 
 _client: AsyncClient | None = None
 
 
-async def get_client() -> AsyncClient:
+async def _get_client() -> AsyncClient:
     global _client
     if _client is None:
         _client = await AsyncClient.create(
@@ -23,62 +29,11 @@ async def close_client() -> None:
         _client = None
 
 
-def _pair(symbol: str, quote: str) -> str:
-    return f"{symbol.upper()}{quote.upper()}"
-
-
-async def get_price(symbol: str, quote: str = "USDT") -> float:
-    client = await get_client()
-    ticker = await client.get_symbol_ticker(symbol=_pair(symbol, quote))
-    return float(ticker["price"])
-
-
-async def get_ticker_24h(symbol: str, quote: str = "USDT") -> dict:
-    client = await get_client()
-    data = await client.get_ticker(symbol=_pair(symbol, quote))
-    return {
-        "price": float(data["lastPrice"]),
-        "change_pct": float(data["priceChangePercent"]),
-        "change": float(data["priceChange"]),
-        "high": float(data["highPrice"]),
-        "low": float(data["lowPrice"]),
-        "volume": float(data["volume"]),
-        "quote_volume": float(data["quoteVolume"]),
-    }
-
-
-async def get_klines(
-    symbol: str,
-    interval: str = "1h",
-    limit: int = 200,
-    quote: str = "USDT",
-) -> pd.DataFrame:
-    client = await get_client()
-    raw = await client.get_klines(
-        symbol=_pair(symbol, quote), interval=interval, limit=limit
-    )
-    df = pd.DataFrame(
-        raw,
-        columns=[
-            "timestamp", "open", "high", "low", "close", "volume",
-            "close_time", "quote_volume", "trades",
-            "taker_buy_base", "taker_buy_quote", "ignore",
-        ],
-    )
-    for col in ("open", "high", "low", "close", "volume"):
-        df[col] = df[col].astype(float)
-    return df
-
-
 async def get_account_balance() -> list[dict]:
-    client = await get_client()
+    client = await _get_client()
     account = await client.get_account()
     return [
-        {
-            "asset": b["asset"],
-            "free": float(b["free"]),
-            "locked": float(b["locked"]),
-        }
+        {"asset": b["asset"], "free": float(b["free"]), "locked": float(b["locked"])}
         for b in account["balances"]
         if float(b["free"]) > 0 or float(b["locked"]) > 0
     ]
@@ -91,8 +46,8 @@ async def place_market_order(
     quantity: float | None = None,
     quote: str = "USDT",
 ) -> dict:
-    client = await get_client()
-    pair = _pair(symbol, quote)
+    client = await _get_client()
+    pair = f"{symbol.upper()}{quote.upper()}"
     if side.upper() == "BUY" and quote_qty is not None:
         return await client.order_market_buy(symbol=pair, quoteOrderQty=round(quote_qty, 2))
     if side.upper() == "SELL" and quantity is not None:

@@ -3,7 +3,7 @@ from database.db import (
     get_active_sl_tp_orders, close_sl_tp_order,
     get_paper_balance, update_paper_balance, add_paper_trade,
 )
-from trading.binance_client import get_price
+from trading.market_data import get_price
 from config import TRADING_MODE, QUOTE_CURRENCY
 
 

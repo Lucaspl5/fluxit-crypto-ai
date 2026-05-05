@@ -1,6 +1,6 @@
 import math
 import pandas as pd
-from trading.binance_client import get_klines
+from trading.market_data import get_klines
 
 
 # ── Indicadores con pandas puro ────────────────────────────────────────────────
