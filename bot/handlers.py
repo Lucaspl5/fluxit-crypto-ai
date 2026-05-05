@@ -211,12 +211,11 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if TRADING_MODE == "paper":
         portfolio = get_paper_portfolio(user_id)
         usdt = get_paper_balance(user_id)
-        prices = {}
-        for sym in portfolio:
-            try:
-                prices[sym] = await get_price(sym, quote=QUOTE_CURRENCY)
-            except Exception:
-                prices[sym] = 0.0
+        try:
+            from trading.market_data import get_prices_batch
+            prices = await get_prices_batch(list(portfolio.keys()))
+        except Exception:
+            prices = {}
         await update.message.reply_text(
             format_portfolio(portfolio, prices, usdt), parse_mode=ParseMode.MARKDOWN
         )

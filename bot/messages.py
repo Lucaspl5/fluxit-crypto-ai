@@ -96,10 +96,13 @@ def format_portfolio(
     total = usdt_balance
 
     for symbol, qty in portfolio.items():
-        price = prices.get(symbol, 0.0)
-        value = qty * price
-        total += value
-        lines.append(f"• *{symbol}*: `{qty:.6f}` ≈ `${value:,.2f} USDT`")
+        price = prices.get(symbol)
+        if price:
+            value = qty * price
+            total += value
+            lines.append(f"• *{symbol}*: `{qty:.6f}` ≈ `${value:,.2f} USDT`")
+        else:
+            lines.append(f"• *{symbol}*: `{qty:.6f}` ≈ `⚠️ precio no disponible`")
 
     if not portfolio:
         lines.append("_Sin posiciones abiertas._")
