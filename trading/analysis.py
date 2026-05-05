@@ -1,19 +1,57 @@
 import math
 import pandas as pd
-import pandas_ta as ta
 from trading.binance_client import get_klines
 
 
-def _safe_float(series: pd.Series | None) -> float | None:
-    if series is None:
+# ── Indicadores con pandas puro ────────────────────────────────────────────────
+
+def _rsi(close: pd.Series, length: int = 14) -> float | None:
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(com=length - 1, min_periods=length).mean()
+    avg_loss = loss.ewm(com=length - 1, min_periods=length).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    val = rsi.iloc[-1]
+    return None if math.isnan(val) else float(val)
+
+
+def _macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple:
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+
+    def _v(s):
+        v = s.iloc[-1]
+        return None if math.isnan(v) else float(v)
+
+    return _v(macd_line), _v(signal_line), _v(histogram)
+
+
+def _bbands(close: pd.Series, length: int = 20, std: float = 2.0) -> tuple:
+    mid = close.rolling(length).mean()
+    dev = close.rolling(length).std()
+    upper = mid + std * dev
+    lower = mid - std * dev
+
+    def _v(s):
+        v = s.iloc[-1]
+        return None if math.isnan(v) else float(v)
+
+    return _v(lower), _v(mid), _v(upper)
+
+
+def _ema(close: pd.Series, length: int) -> float | None:
+    if len(close) < length:
         return None
-    val = series.iloc[-1]
-    return None if (val is None or (isinstance(val, float) and math.isnan(val))) else float(val)
+    val = close.ewm(span=length, adjust=False).mean().iloc[-1]
+    return None if math.isnan(val) else float(val)
 
 
-def _first_col(df: pd.DataFrame, prefix: str) -> str:
-    return next(c for c in df.columns if c.startswith(prefix))
-
+# ── Análisis completo ──────────────────────────────────────────────────────────
 
 async def get_analysis(
     symbol: str,
@@ -24,39 +62,17 @@ async def get_analysis(
     close = df["close"]
     current_price = float(close.iloc[-1])
 
-    # RSI
-    rsi_s = ta.rsi(close, length=14)
-    rsi = _safe_float(rsi_s)
+    rsi = _rsi(close)
+    macd, macd_signal, macd_hist = _macd(close)
+    bb_lower, bb_mid, bb_upper = _bbands(close)
+    ema_20 = _ema(close, 20)
+    ema_50 = _ema(close, 50)
+    ema_200 = _ema(close, 200)
 
-    # MACD
-    macd_df = ta.macd(close)
-    if macd_df is not None:
-        macd = _safe_float(macd_df[_first_col(macd_df, "MACD_")])
-        macd_signal = _safe_float(macd_df[_first_col(macd_df, "MACDs_")])
-        macd_hist = _safe_float(macd_df[_first_col(macd_df, "MACDh_")])
-    else:
-        macd = macd_signal = macd_hist = None
-
-    # Bollinger Bands
-    bb_df = ta.bbands(close, length=20)
-    if bb_df is not None:
-        bb_lower = _safe_float(bb_df[_first_col(bb_df, "BBL_")])
-        bb_mid = _safe_float(bb_df[_first_col(bb_df, "BBM_")])
-        bb_upper = _safe_float(bb_df[_first_col(bb_df, "BBU_")])
-    else:
-        bb_lower = bb_mid = bb_upper = None
-
-    # EMAs
-    ema_20 = _safe_float(ta.ema(close, length=20))
-    ema_50 = _safe_float(ta.ema(close, length=50))
-    ema_200 = _safe_float(ta.ema(close, length=200)) if len(close) >= 200 else None
-
-    # Volume
     avg_vol = float(df["volume"].rolling(20).mean().iloc[-1])
     cur_vol = float(df["volume"].iloc[-1])
     volume_ratio = cur_vol / avg_vol if avg_vol > 0 else 1.0
 
-    # Trend (price vs long-term EMA)
     ref_ema = ema_200 or ema_50 or ema_20
     trend = "ALCISTA" if (ref_ema and current_price > ref_ema) else "BAJISTA"
 
