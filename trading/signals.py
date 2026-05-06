@@ -84,8 +84,12 @@ async def generate_signal(symbol: str, interval: str = "1h") -> dict:
 
 
 async def scan_watchlist(symbols: list[str], interval: str = "1h") -> list[dict]:
-    tasks = [generate_signal(s, interval) for s in symbols]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    valid = [r for r in results if isinstance(r, dict)]
-    valid.sort(key=lambda x: -x["score"])
-    return valid
+    results = []
+    for sym in symbols:
+        try:
+            results.append(await generate_signal(sym, interval))
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    results.sort(key=lambda x: -x["score"])
+    return results

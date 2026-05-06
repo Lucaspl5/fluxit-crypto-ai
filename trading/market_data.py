@@ -43,22 +43,8 @@ def _cg_id(symbol: str) -> str:
 
 # ── HTTP con reintentos en 429 ─────────────────────────────────────────────────
 
-_request_lock = asyncio.Lock()
-_last_request_time: float = 0.0
-MIN_REQUEST_INTERVAL = 1.5  # segundos mínimos entre llamadas a CoinGecko
-
-
 async def _get(url: str, params: dict | None = None) -> dict | list:
-    global _last_request_time
     timeout = aiohttp.ClientTimeout(total=15)
-
-    async with _request_lock:
-        now = time.monotonic()
-        wait_needed = MIN_REQUEST_INTERVAL - (now - _last_request_time)
-        if wait_needed > 0:
-            await asyncio.sleep(wait_needed)
-        _last_request_time = time.monotonic()
-
     for attempt in range(4):
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, params=params) as resp:
