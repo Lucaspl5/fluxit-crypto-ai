@@ -175,6 +175,27 @@ def get_paper_portfolio(user_id: int) -> dict[str, float]:
     return {k: v for k, v in portfolio.items() if v > 1e-10}
 
 
+def get_avg_entry_price(user_id: int, symbol: str) -> float | None:
+    """Weighted average buy price for current holdings."""
+    row = _execute(
+        "SELECT SUM(price * quantity) / SUM(quantity) AS avg_price "
+        "FROM paper_trades WHERE user_id=%s AND symbol=%s AND side='BUY'",
+        (user_id, symbol), fetch="one",
+    )
+    if row and row["avg_price"]:
+        return float(row["avg_price"])
+    return None
+
+
+def get_protected_symbols(user_id: int) -> set[str]:
+    """Symbols that already have an active SL/TP order."""
+    rows = _execute(
+        "SELECT DISTINCT symbol FROM sl_tp_orders WHERE user_id=%s AND status='active'",
+        (user_id,), fetch="all",
+    ) or []
+    return {r["symbol"] for r in rows}
+
+
 # ── Stop Loss / Take Profit ────────────────────────────────────────────────────
 
 def add_sl_tp_order(

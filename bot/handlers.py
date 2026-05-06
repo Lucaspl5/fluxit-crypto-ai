@@ -12,6 +12,7 @@ from database.db import (
     add_to_watchlist, remove_from_watchlist, get_watchlist,
     get_paper_balance, update_paper_balance, add_paper_trade, get_paper_portfolio,
     add_sl_tp_order, get_sl_tp_orders_by_user, cancel_sl_tp_order,
+    get_avg_entry_price, get_protected_symbols,
 )
 from trading.binance_client import get_ticker_24h, get_price, place_market_order, get_account_balance
 from trading.analysis import get_analysis
@@ -66,7 +67,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🟢 `/comprar BTC 100` — Comprar con 100 USDT\n"
         "       _Opciones: `sl=45000 tp=55000`_\n"
         "🔴 `/vender BTC 0.001` — Vender cantidad\n"
-        "📌 `/posiciones` — Ver órdenes SL/TP activas\n\n"
+        "📌 `/posiciones` — Ver órdenes SL/TP activas\n"
+        "🛡 `/proteger` — Poner SL/TP a todas las posiciones\n\n"
         f"Modo: *{mode_label}*"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -401,6 +403,56 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=cancel_sltp_keyboard(order["id"]),
         )
+
+
+# ── /proteger ─────────────────────────────────────────────────────────────────
+
+@auth_required
+async def cmd_protect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    portfolio = get_paper_portfolio(user_id)
+
+    if not portfolio:
+        await update.message.reply_text("No tienes posiciones abiertas.")
+        return
+
+    # Parse optional SL% and TP%
+    try:
+        sl_pct = float(context.args[0]) if len(context.args) > 0 else 5.0
+        tp_pct = float(context.args[1]) if len(context.args) > 1 else 10.0
+    except ValueError:
+        await update.message.reply_text("Uso: `/proteger [sl%] [tp%]`\nEjemplo: `/proteger 5 10`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    already_protected = get_protected_symbols(user_id)
+    to_protect = {s: q for s, q in portfolio.items() if s not in already_protected}
+
+    if not to_protect:
+        await update.message.reply_text("✅ Todas tus posiciones ya tienen SL/TP activo.")
+        return
+
+    msg = await update.message.reply_text(f"⏳ Protegiendo {len(to_protect)} posiciones...")
+
+    lines = [f"🛡 *Protección automática aplicada* (SL -{sl_pct}% / TP +{tp_pct}%)\n"]
+    errors = []
+
+    for symbol, qty in to_protect.items():
+        try:
+            from trading.market_data import get_price as _get_price
+            entry = get_avg_entry_price(user_id, symbol) or await _get_price(symbol)
+            sl = round(entry * (1 - sl_pct / 100), 6)
+            tp = round(entry * (1 + tp_pct / 100), 6)
+            add_sl_tp_order(user_id, symbol, qty, entry, sl, tp)
+            lines.append(
+                f"• *{symbol}*: entrada `${entry:,.4f}` | 🛑 SL `${sl:,.4f}` | ✅ TP `${tp:,.4f}`"
+            )
+        except Exception as e:
+            errors.append(f"• {symbol}: {e}")
+
+    if errors:
+        lines.append("\n⚠️ Errores:\n" + "\n".join(errors))
+
+    await msg.edit_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 # ── Callbacks ──────────────────────────────────────────────────────────────────

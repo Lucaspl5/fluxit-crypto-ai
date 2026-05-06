@@ -13,7 +13,7 @@ from bot.handlers import (
     cmd_add_alert, cmd_list_alerts,
     cmd_signals, cmd_watchlist,
     cmd_portfolio, cmd_balance,
-    cmd_buy, cmd_sell, cmd_positions,
+    cmd_buy, cmd_sell, cmd_positions, cmd_protect,
     callback_handler,
 )
 
@@ -127,6 +127,7 @@ def _build_app() -> Application:
     app.add_handler(CommandHandler("comprar",    cmd_buy))
     app.add_handler(CommandHandler("vender",     cmd_sell))
     app.add_handler(CommandHandler("posiciones", cmd_positions))
+    app.add_handler(CommandHandler("proteger",   cmd_protect))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
     app.job_queue.run_repeating(_alert_job,  interval=ALERT_CHECK_INTERVAL,  first=15)
