@@ -170,6 +170,10 @@ async def _signal_job(context) -> None:
 
         watchlist = get_watchlist(TELEGRAM_CHAT_ID) or WATCHLIST_DEFAULT
         results = await scan_watchlist(watchlist, interval="1h")
+
+        # Guardar resultado en bot_data para que el menú lo use instantáneamente
+        context.bot_data["last_signals"] = results
+
         strong = [r for r in results if abs(r["score"]) >= 3]
         if strong:
             lines = ["📡 *Señal fuerte detectada*\n"]

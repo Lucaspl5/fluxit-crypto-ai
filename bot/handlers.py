@@ -562,22 +562,22 @@ async def _handle_menu_callback(query, user_id: int, data: str, context) -> None
         return
 
     if data == "menu_signals":
-        watchlist = get_watchlist(user_id) or WATCHLIST_DEFAULT
         try:
-            await query.edit_message_text(
-                f"⏳ Escaneando {len(watchlist)} pares...",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=back_to_menu_keyboard(),
-            )
-            results = await scan_watchlist(watchlist, interval="1h")
-            lines = ["📊 *Señales del mercado (1h)*\n"]
-            for sig in results:
-                lines.append(format_signal(sig))
-            await query.edit_message_text(
-                "\n".join(lines),
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=back_to_menu_keyboard(),
-            )
+            results = context.bot_data.get("last_signals")
+            if results:
+                lines = ["📊 *Señales del mercado (1h)*\n_Actualizado cada 5 min por el bot_\n"]
+                for sig in results:
+                    lines.append(format_signal(sig))
+                await query.edit_message_text(
+                    "\n".join(lines),
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=back_to_menu_keyboard(),
+                )
+            else:
+                await query.edit_message_text(
+                    "⏳ El bot está calculando las señales por primera vez...\n\nEspera 5 minutos y vuelve a intentarlo.",
+                    reply_markup=back_to_menu_keyboard(),
+                )
         except Exception as e:
             await query.edit_message_text(f"❌ Error: {e}", reply_markup=back_to_menu_keyboard())
 
