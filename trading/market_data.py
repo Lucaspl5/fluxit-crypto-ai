@@ -30,9 +30,11 @@ SYMBOL_TO_CG: dict[str, str] = {
 
 _INTERVAL_DAYS = {"15m": 2, "1h": 14, "4h": 60, "1d": 365}
 
-# ── Caché de precios (TTL 20s) ─────────────────────────────────────────────────
+# ── Caché de precios (TTL 60s) y klines (TTL 5min) ────────────────────────────
 _price_cache: dict[str, tuple[float, float]] = {}   # cg_id -> (price, timestamp)
-CACHE_TTL = 20
+_klines_cache: dict[str, tuple[object, float]] = {} # key -> (df, timestamp)
+CACHE_TTL = 60
+KLINES_CACHE_TTL = 300
 
 
 def _cg_id(symbol: str) -> str:
@@ -41,13 +43,27 @@ def _cg_id(symbol: str) -> str:
 
 # ── HTTP con reintentos en 429 ─────────────────────────────────────────────────
 
+_request_lock = asyncio.Lock()
+_last_request_time: float = 0.0
+MIN_REQUEST_INTERVAL = 1.5  # segundos mínimos entre llamadas a CoinGecko
+
+
 async def _get(url: str, params: dict | None = None) -> dict | list:
+    global _last_request_time
     timeout = aiohttp.ClientTimeout(total=15)
+
+    async with _request_lock:
+        now = time.monotonic()
+        wait_needed = MIN_REQUEST_INTERVAL - (now - _last_request_time)
+        if wait_needed > 0:
+            await asyncio.sleep(wait_needed)
+        _last_request_time = time.monotonic()
+
     for attempt in range(4):
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, params=params) as resp:
                 if resp.status == 429:
-                    wait = 2 ** attempt          # 1s, 2s, 4s, 8s
+                    wait = 3 * (2 ** attempt)   # 3s, 6s, 12s, 24s
                     await asyncio.sleep(wait)
                     continue
                 resp.raise_for_status()
@@ -132,6 +148,14 @@ async def get_klines(
     quote: str = "USDT",
 ) -> pd.DataFrame:
     cg_id = _cg_id(symbol)
+    cache_key = f"{cg_id}_{interval}"
+    now = time.monotonic()
+
+    if cache_key in _klines_cache:
+        df_cached, ts = _klines_cache[cache_key]
+        if now - ts < KLINES_CACHE_TTL:
+            return df_cached.tail(limit).reset_index(drop=True)
+
     days = _INTERVAL_DAYS.get(interval, 14)
 
     data = await _get(
@@ -160,4 +184,5 @@ async def get_klines(
             .reset_index()
         )
 
+    _klines_cache[cache_key] = (df, time.monotonic())
     return df.tail(limit).reset_index(drop=True)
