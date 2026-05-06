@@ -151,7 +151,7 @@ def format_performance(
     emoji_total = "🟢" if total_pnl >= 0 else "🔴"
     sign = "+" if total_pnl >= 0 else ""
 
-    lines.append(f"\n{emoji_total} *Total: `${total_current:,.2f}`*  ({sign}{total_pnl_pct:.2f}%  {sign}${total_pnl:,.2f})")
+    lines.append(f"\n{emoji_total} *Total: ${total_current:,.2f}*  ({sign}{total_pnl_pct:.2f}%  {sign}${total_pnl:,.2f})")
     return "\n".join(lines)
 
 

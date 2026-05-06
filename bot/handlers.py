@@ -475,6 +475,8 @@ async def cmd_protect(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    if query is None:
+        return
     user_id = query.from_user.id
 
     if TELEGRAM_CHAT_ID and user_id != TELEGRAM_CHAT_ID:
@@ -537,90 +539,121 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _handle_menu_callback(query, user_id: int, data: str, context) -> None:
     from datetime import datetime
     from trading.market_data import get_prices_batch
+    from telegram.error import BadRequest
 
     now = datetime.now().strftime("%H:%M")
 
-    if data in ("menu_refresh",):
-        await query.edit_message_text(
-            format_menu_header(now),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=main_menu_keyboard(),
-        )
+    if data == "menu_refresh":
+        try:
+            await query.edit_message_text(
+                format_menu_header(now),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=main_menu_keyboard(),
+            )
+        except BadRequest as e:
+            if "Message is not modified" not in str(e):
+                raise
         return
 
     if data == "menu_signals":
         watchlist = get_watchlist(user_id) or WATCHLIST_DEFAULT
-        await query.edit_message_text(f"⏳ Escaneando {len(watchlist)} pares...", parse_mode=ParseMode.MARKDOWN)
         try:
+            await query.edit_message_text(
+                f"⏳ Escaneando {len(watchlist)} pares...",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=back_to_menu_keyboard(),
+            )
             results = await scan_watchlist(watchlist, interval="1h")
             lines = ["📊 *Señales del mercado (1h)*\n"]
             for sig in results:
                 lines.append(format_signal(sig))
-            await query.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=back_to_menu_keyboard())
+            await query.edit_message_text(
+                "\n".join(lines),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=back_to_menu_keyboard(),
+            )
         except Exception as e:
             await query.edit_message_text(f"❌ Error: {e}", reply_markup=back_to_menu_keyboard())
 
     elif data == "menu_trades":
-        trades = get_recent_trades(user_id)
-        await query.edit_message_text(
-            format_recent_trades(trades),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=back_to_menu_keyboard(),
-        )
+        try:
+            trades = get_recent_trades(user_id)
+            await query.edit_message_text(
+                format_recent_trades(trades),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=back_to_menu_keyboard(),
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error: {e}", reply_markup=back_to_menu_keyboard())
 
     elif data == "menu_performance":
-        portfolio = get_paper_portfolio(user_id)
-        usdt = get_paper_balance(user_id)
         try:
-            prices = await get_prices_batch(list(portfolio.keys()))
-        except Exception:
-            prices = {}
-        entry_prices = {sym: get_avg_entry_price(user_id, sym) or prices.get(sym, 0) for sym in portfolio}
-        await query.edit_message_text(
-            format_performance(portfolio, prices, entry_prices, usdt),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=back_to_menu_keyboard(),
-        )
+            portfolio = get_paper_portfolio(user_id)
+            usdt = get_paper_balance(user_id)
+            try:
+                prices = await get_prices_batch(list(portfolio.keys()))
+            except Exception:
+                prices = {}
+            entry_prices = {sym: get_avg_entry_price(user_id, sym) or prices.get(sym, 0) for sym in portfolio}
+            await query.edit_message_text(
+                format_performance(portfolio, prices, entry_prices, usdt),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=back_to_menu_keyboard(),
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error: {e}", reply_markup=back_to_menu_keyboard())
 
     elif data == "menu_positions":
-        orders = get_sl_tp_orders_by_user(user_id)
-        if not orders:
-            text = "📍 *Posiciones SL/TP*\n\n_Sin órdenes activas._"
-        else:
-            lines = ["📍 *Posiciones con SL/TP activo*\n"]
-            for o in orders:
-                sl_str = f"🛑 `${o['stop_loss']:,.4f}`" if o["stop_loss"] else "🛑 —"
-                tp_str = f"✅ `${o['take_profit']:,.4f}`" if o["take_profit"] else "✅ —"
-                lines.append(f"• *{o['symbol']}* `{float(o['quantity']):.6f}` | entrada `${float(o['entry_price']):,.4f}`\n  {sl_str}  {tp_str}")
-            text = "\n".join(lines)
-        await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=back_to_menu_keyboard())
+        try:
+            orders = get_sl_tp_orders_by_user(user_id)
+            if not orders:
+                text = "📍 *Posiciones SL/TP*\n\n_Sin órdenes activas._"
+            else:
+                lines = ["📍 *Posiciones con SL/TP activo*\n"]
+                for o in orders:
+                    sl_str = f"SL: `${float(o['stop_loss']):,.4f}`" if o["stop_loss"] else "SL: —"
+                    tp_str = f"TP: `${float(o['take_profit']):,.4f}`" if o["take_profit"] else "TP: —"
+                    lines.append(
+                        f"*{o['symbol']}* `{float(o['quantity']):.6f}` @ `${float(o['entry_price']):,.4f}`\n"
+                        f"  {sl_str}  |  {tp_str}"
+                    )
+                text = "\n".join(lines)
+            await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=back_to_menu_keyboard())
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error: {e}", reply_markup=back_to_menu_keyboard())
 
     elif data == "menu_balance":
-        usdt = get_paper_balance(user_id)
-        portfolio = get_paper_portfolio(user_id)
         try:
-            prices = await get_prices_batch(list(portfolio.keys()))
-        except Exception:
-            prices = {}
-        crypto_val = sum(portfolio.get(s, 0) * prices.get(s, 0) for s in portfolio)
-        await query.edit_message_text(
-            f"🏦 *Cuenta (Paper Trading)*\n\n"
-            f"💵 USDT disponible: `${usdt:,.2f}`\n"
-            f"📊 En cripto: `${crypto_val:,.2f}`\n"
-            f"💰 *Total: `${usdt + crypto_val:,.2f}`*",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=back_to_menu_keyboard(),
-        )
+            usdt = get_paper_balance(user_id)
+            portfolio = get_paper_portfolio(user_id)
+            try:
+                prices = await get_prices_batch(list(portfolio.keys()))
+            except Exception:
+                prices = {}
+            crypto_val = sum(portfolio.get(s, 0) * prices.get(s, 0) for s in portfolio)
+            await query.edit_message_text(
+                f"🏦 *Cuenta (Paper Trading)*\n\n"
+                f"💵 USDT disponible: `${usdt:,.2f}`\n"
+                f"📊 En cripto: `${crypto_val:,.2f}`\n"
+                f"💰 Total: `${usdt + crypto_val:,.2f}`",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=back_to_menu_keyboard(),
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error: {e}", reply_markup=back_to_menu_keyboard())
 
     elif data == "menu_status":
-        active_alerts = len(get_alerts(user_id=user_id, active_only=True))
-        active_sltp = len(get_sl_tp_orders_by_user(user_id))
-        watchlist = get_watchlist(user_id) or WATCHLIST_DEFAULT
-        await query.edit_message_text(
-            format_status(TRADING_MODE, active_alerts, active_sltp, len(watchlist)),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=back_to_menu_keyboard(),
-        )
+        try:
+            active_alerts = len(get_alerts(user_id=user_id, active_only=True))
+            active_sltp = len(get_sl_tp_orders_by_user(user_id))
+            watchlist = get_watchlist(user_id) or WATCHLIST_DEFAULT
+            await query.edit_message_text(
+                format_status(TRADING_MODE, active_alerts, active_sltp, len(watchlist)),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=back_to_menu_keyboard(),
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error: {e}", reply_markup=back_to_menu_keyboard())
 
 
 async def _execute_paper_order(query, order: dict) -> None:
