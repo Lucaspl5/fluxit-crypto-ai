@@ -162,6 +162,13 @@ def add_paper_trade(user_id: int, symbol: str, side: str, quantity: float, price
     )
 
 
+def get_recent_trades(user_id: int, limit: int = 10) -> list:
+    return _execute(
+        "SELECT * FROM paper_trades WHERE user_id=%s ORDER BY id DESC LIMIT %s",
+        (user_id, limit), fetch="all",
+    ) or []
+
+
 def get_paper_portfolio(user_id: int) -> dict[str, float]:
     rows = _execute(
         "SELECT symbol, side, SUM(quantity) AS qty FROM paper_trades "

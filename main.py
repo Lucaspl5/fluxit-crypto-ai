@@ -13,7 +13,7 @@ from bot.handlers import (
     cmd_add_alert, cmd_list_alerts,
     cmd_signals, cmd_watchlist,
     cmd_portfolio, cmd_balance,
-    cmd_buy, cmd_sell, cmd_positions, cmd_protect,
+    cmd_buy, cmd_sell, cmd_positions, cmd_protect, cmd_menu,
     callback_handler,
 )
 
@@ -114,6 +114,7 @@ async def _signal_job(context) -> None:
 def _build_app() -> Application:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
+    app.add_handler(CommandHandler("menu",       cmd_menu))
     app.add_handler(CommandHandler("start",      cmd_start))
     app.add_handler(CommandHandler("help",       cmd_start))
     app.add_handler(CommandHandler("precio",     cmd_price))

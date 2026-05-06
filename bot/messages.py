@@ -110,3 +110,78 @@ def format_portfolio(
     lines.append(f"\n💵 *USDT disponible:* `${usdt_balance:,.2f}`")
     lines.append(f"📊 *Valor total:* `${total:,.2f} USDT`")
     return "\n".join(lines)
+
+
+def format_menu_header(now_str: str) -> str:
+    return (
+        f"📈 *FLUXIT CRYPTO — DASHBOARD*\n"
+        f"🕐 Actualizado: {now_str}\n\n"
+        f"¿Qué quieres ver?"
+    )
+
+
+def format_performance(
+    portfolio: dict[str, float],
+    prices: dict[str, float],
+    entry_prices: dict[str, float],
+    usdt_balance: float,
+    initial_balance: float = 10000.0,
+) -> str:
+    lines = ["💰 *Rendimiento (Paper Trading)*\n"]
+    total_current = usdt_balance
+    total_invested = 0.0
+
+    for symbol, qty in portfolio.items():
+        current = prices.get(symbol, 0.0)
+        entry = entry_prices.get(symbol, current)
+        value_now = qty * current
+        value_entry = qty * entry
+        pnl = value_now - value_entry
+        pnl_pct = (pnl / value_entry * 100) if value_entry > 0 else 0
+        emoji = "🟢" if pnl >= 0 else "🔴"
+        sign = "+" if pnl >= 0 else ""
+        total_current += value_now
+        total_invested += value_entry
+        lines.append(
+            f"{emoji} *{symbol}*: `${value_now:,.2f}` ({sign}{pnl_pct:.2f}%  {sign}${pnl:,.2f})"
+        )
+
+    total_pnl = total_current - initial_balance
+    total_pnl_pct = (total_pnl / initial_balance * 100)
+    emoji_total = "🟢" if total_pnl >= 0 else "🔴"
+    sign = "+" if total_pnl >= 0 else ""
+
+    lines.append(f"\n{emoji_total} *Total: `${total_current:,.2f}`*  ({sign}{total_pnl_pct:.2f}%  {sign}${total_pnl:,.2f})")
+    return "\n".join(lines)
+
+
+def format_recent_trades(trades: list) -> str:
+    if not trades:
+        return "📋 *Órdenes recientes*\n\n_Sin operaciones aún._"
+    lines = ["📋 *Órdenes recientes*\n"]
+    for t in trades[:10]:
+        emoji = "🟢" if t["side"] == "BUY" else "🔴"
+        ts = t["timestamp"][:16].replace("T", " ")
+        lines.append(
+            f"{emoji} *{t['symbol']}* {t['side']}  `{float(t['quantity']):.6f}`  @ `${float(t['price']):,.4f}`\n"
+            f"   `${float(t['total_usdt']):,.2f} USDT`  _{ts}_"
+        )
+    return "\n".join(lines)
+
+
+def format_status(
+    trading_mode: str,
+    active_alerts: int,
+    active_sl_tp: int,
+    watchlist_count: int,
+) -> str:
+    mode_label = "📄 Paper Trading" if trading_mode == "paper" else "⚡ Live Trading"
+    return (
+        f"⚙️ *Estado del Bot*\n\n"
+        f"🤖 Modo: *{mode_label}*\n"
+        f"🔔 Alertas activas: `{active_alerts}`\n"
+        f"🛡 Órdenes SL/TP: `{active_sl_tp}`\n"
+        f"👁 Watchlist: `{watchlist_count}` pares\n"
+        f"⏱ Chequeo alertas: cada 60s\n"
+        f"📡 Escaneo señales: cada 5min"
+    )
