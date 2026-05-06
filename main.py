@@ -121,6 +121,13 @@ async def run_web_server() -> None:
 
 async def _alert_job(context) -> None:
     try:
+        from trading.market_data import get_prices_batch
+        from database.db import get_watchlist
+        watchlist = get_watchlist(TELEGRAM_CHAT_ID) or WATCHLIST_DEFAULT
+        await get_prices_batch(watchlist)
+    except Exception:
+        pass
+    try:
         triggered = await check_alerts()
         for alert in triggered:
             verb = "subido por encima" if alert["direction"] == "above" else "bajado por debajo"
