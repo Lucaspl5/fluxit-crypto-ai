@@ -30,7 +30,10 @@ def auth_required(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if TELEGRAM_CHAT_ID and update.effective_user.id != TELEGRAM_CHAT_ID:
-            await update.message.reply_text("⛔ No autorizado.")
+            await update.message.reply_text(
+                "👋 Este bot es privado.\n\n"
+                "¿Quieres el tuyo? Visita crypto.fluxit.es o escríbeme: @lucaspariente"
+            )
             return
         return await func(update, context)
     return wrapper
@@ -52,7 +55,10 @@ def _pop_order(context: ContextTypes.DEFAULT_TYPE, order_id: str) -> dict | None
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if TELEGRAM_CHAT_ID and update.effective_user.id != TELEGRAM_CHAT_ID:
-        await update.message.reply_text("⛔ No autorizado.")
+        await update.message.reply_text(
+            "👋 Este bot es privado.\n\n"
+            "¿Quieres el tuyo? Visita crypto.fluxit.es o escríbeme: @lucaspariente"
+        )
         return
     mode_label = "📄 Paper Trading" if TRADING_MODE == "paper" else "⚡ Live Trading"
     text = (
