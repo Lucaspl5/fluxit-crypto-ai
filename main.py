@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+import os
 
 from aiohttp import web
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -23,22 +25,96 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
-# ── Health check server ────────────────────────────────────────────────────────
+
+# ── Web server ─────────────────────────────────────────────────────────────────
+
+async def _landing(request: web.Request) -> web.Response:
+    return web.FileResponse(os.path.join(_WEB_DIR, "landing.html"))
+
+
+async def _dashboard(request: web.Request) -> web.Response:
+    return web.FileResponse(os.path.join(_WEB_DIR, "dashboard.html"))
+
 
 async def _health(request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
 
-async def run_health_server() -> None:
+async def _api_dashboard(request: web.Request) -> web.Response:
+    """JSON endpoint consumed by the dashboard page."""
+    from database.db import (
+        get_paper_balance, get_paper_portfolio,
+        get_active_sl_tp_orders, get_recent_trades, get_avg_entry_price,
+    )
+    from trading.market_data import get_prices_batch
+    from config import TELEGRAM_CHAT_ID
+
+    user_id = TELEGRAM_CHAT_ID
+    portfolio = get_paper_portfolio(user_id)
+    usdt = get_paper_balance(user_id)
+
+    try:
+        prices = await get_prices_batch(list(portfolio.keys()))
+    except Exception:
+        prices = {}
+
+    sl_tp_orders = get_active_sl_tp_orders()
+    sl_tp_map: dict[str, dict] = {}
+    for o in sl_tp_orders:
+        if o["user_id"] == user_id:
+            sl_tp_map[o["symbol"]] = {
+                "stop_loss": float(o["stop_loss"]) if o["stop_loss"] else None,
+                "take_profit": float(o["take_profit"]) if o["take_profit"] else None,
+            }
+
+    positions = []
+    crypto_value = 0.0
+    for sym, qty in portfolio.items():
+        price = prices.get(sym, 0.0)
+        entry = get_avg_entry_price(user_id, sym) or price
+        value = qty * price
+        crypto_value += value
+        sltp = sl_tp_map.get(sym, {})
+        positions.append({
+            "symbol": sym,
+            "quantity": qty,
+            "current_price": price,
+            "avg_entry": entry,
+            "value": value,
+            "invested": qty * entry,
+            "stop_loss": sltp.get("stop_loss"),
+            "take_profit": sltp.get("take_profit"),
+        })
+
+    recent_trades = [dict(t) for t in get_recent_trades(user_id, limit=10)]
+
+    payload = {
+        "usdt": usdt,
+        "crypto_value": crypto_value,
+        "total": usdt + crypto_value,
+        "positions": positions,
+        "recent_trades": recent_trades,
+    }
+    return web.Response(
+        text=json.dumps(payload, default=str),
+        content_type="application/json",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+async def run_web_server() -> None:
     app = web.Application()
-    app.router.add_get("/", _health)
-    app.router.add_get("/health", _health)
+    app.router.add_get("/",              _landing)
+    app.router.add_get("/dashboard",     _dashboard)
+    app.router.add_get("/health",        _health)
+    app.router.add_get("/api/dashboard", _api_dashboard)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    logger.info(f"Health server escuchando en puerto {PORT}")
+    logger.info(f"Web server en puerto {PORT}")
 
 
 # ── Background jobs ────────────────────────────────────────────────────────────
@@ -84,7 +160,6 @@ async def _sl_tp_job(context) -> None:
 
 
 async def _signal_job(context) -> None:
-    """Scan watchlist every SIGNAL_SCAN_INTERVAL and notify strong signals."""
     if not TELEGRAM_CHAT_ID:
         return
     try:
@@ -131,9 +206,9 @@ def _build_app() -> Application:
     app.add_handler(CommandHandler("proteger",   cmd_protect))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    app.job_queue.run_repeating(_alert_job,  interval=ALERT_CHECK_INTERVAL,  first=15)
-    app.job_queue.run_repeating(_sl_tp_job,  interval=ALERT_CHECK_INTERVAL,  first=20)
-    app.job_queue.run_repeating(_signal_job, interval=SIGNAL_SCAN_INTERVAL,  first=60)
+    app.job_queue.run_repeating(_alert_job,  interval=ALERT_CHECK_INTERVAL, first=15)
+    app.job_queue.run_repeating(_sl_tp_job,  interval=ALERT_CHECK_INTERVAL, first=20)
+    app.job_queue.run_repeating(_signal_job, interval=SIGNAL_SCAN_INTERVAL, first=60)
 
     return app
 
@@ -145,14 +220,14 @@ async def _run() -> None:
         raise RuntimeError("TELEGRAM_BOT_TOKEN no configurado.")
 
     init_db()
-    await run_health_server()
+    await run_web_server()
 
     tg_app = _build_app()
     async with tg_app:
         await tg_app.start()
         await tg_app.updater.start_polling(drop_pending_updates=True)
         logger.info("FluxIT Crypto Bot iniciado.")
-        await asyncio.Event().wait()   # block forever
+        await asyncio.Event().wait()
         await tg_app.updater.stop()
         await tg_app.stop()
 
