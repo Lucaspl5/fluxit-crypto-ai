@@ -1,15 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { execSync } from 'child_process';
 
 async function bootstrap() {
-  try {
-    execSync('npx prisma db push --accept-data-loss && npx tsx prisma/seed.ts', { stdio: 'inherit' });
-  } catch (e) {
-    console.error('Prisma startup error:', e.message);
-  }
-
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({ origin: '*', methods: 'GET,HEAD,PUT,PATCH,POST,DELETE' });
