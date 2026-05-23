@@ -203,12 +203,12 @@ export class TelegramService implements OnModuleInit {
     const buying   = Number(account.buying_power ?? 0);
 
     return (
-      '🏦 <b>Cuenta Alpaca Crypto (Paper)</b>\n\n' +
+      '🏦 <b>Cuenta Binance</b>\n\n' +
       `💼 Patrimonio: $${equity.toFixed(2)}\n` +
       `💵 Efectivo: $${cash.toFixed(2)}\n` +
       `📈 P&L No realizado: ${pl >= 0 ? '+' : ''}$${pl.toFixed(2)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%)\n` +
       `🛒 Poder de compra: $${buying.toFixed(2)}\n\n` +
-      `🔒 Modo: Paper Trading · 24/7`
+      `🔒 Modo: ${process.env.BINANCE_TESTNET === 'true' ? 'Testnet (Paper)' : 'Live'} · 24/7`
     );
   }
 
@@ -223,7 +223,7 @@ export class TelegramService implements OnModuleInit {
     return (
       '⚙️ <b>Estado del Sistema</b>\n\n' +
       '🟢 Backend: Activo\n' +
-      '🟢 Alpaca Crypto: Paper Trading 24/7\n' +
+      `🟢 Binance: ${process.env.BINANCE_TESTNET === 'true' ? 'Testnet 24/7' : 'Live 24/7'}\n` +
       '🟢 Análisis: Cada 15 min\n' +
       `📉 Stop Loss: -${sl}%\n` +
       `📈 Take Profit: +${tp}%\n` +

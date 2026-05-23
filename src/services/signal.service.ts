@@ -10,7 +10,7 @@ import { signal as SignalModel } from '@prisma/client';
 import Decimal from 'decimal.js';
 
 // Crypto market reference — BTC is used as the broad market indicator (like SPY for stocks)
-const MARKET_REFERENCE = 'BTCUSD';
+const MARKET_REFERENCE = 'BTCUSDT';
 
 @Injectable()
 export class SignalService implements OnApplicationBootstrap {

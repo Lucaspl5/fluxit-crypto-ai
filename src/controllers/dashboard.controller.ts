@@ -130,7 +130,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <header>
   <span>₿</span>
   <h1>Crypto AI — Fluxit</h1>
-  <span class="badge">PAPER</span>
+  <span class="badge">BINANCE</span>
   <span class="badge-live">24/7</span>
   <button class="refresh" onclick="loadData()">⟳ Actualizar</button>
 </header>

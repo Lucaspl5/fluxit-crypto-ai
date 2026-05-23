@@ -4,16 +4,16 @@ const prisma = new PrismaClient();
 
 const symbols = [
   // Low risk — BTC & ETH: SL 5% / TP 12% / convergence 2
-  { symbol: 'BTCUSD', profile: 'BAJO',   rsiOB: 75, rsiOS: 25, ma50: 50, ma200: 200, volThr: 110, sl: 5.0,  tp: 12.0, conv: 2 },
-  { symbol: 'ETHUSD', profile: 'BAJO',   rsiOB: 75, rsiOS: 25, ma50: 50, ma200: 200, volThr: 110, sl: 5.0,  tp: 12.0, conv: 2 },
+  { symbol: 'BTCUSDT', profile: 'BAJO',   rsiOB: 75, rsiOS: 25, ma50: 50, ma200: 200, volThr: 110, sl: 5.0,  tp: 12.0, conv: 2 },
+  { symbol: 'ETHUSDT', profile: 'BAJO',   rsiOB: 75, rsiOS: 25, ma50: 50, ma200: 200, volThr: 110, sl: 5.0,  tp: 12.0, conv: 2 },
   // Medium risk — Large Cap Altcoins: SL 7% / TP 18% / convergence 2
-  { symbol: 'SOLUSD', profile: 'MEDIUM', rsiOB: 70, rsiOS: 30, ma50: 20, ma200: 200, volThr: 120, sl: 7.0,  tp: 18.0, conv: 2 },
-  { symbol: 'AVAXUSD',profile: 'MEDIUM', rsiOB: 70, rsiOS: 30, ma50: 20, ma200: 200, volThr: 120, sl: 7.0,  tp: 18.0, conv: 2 },
-  { symbol: 'LINKUSD',profile: 'MEDIUM', rsiOB: 70, rsiOS: 30, ma50: 20, ma200: 200, volThr: 120, sl: 7.0,  tp: 18.0, conv: 3 },
+  { symbol: 'SOLUSDT', profile: 'MEDIUM', rsiOB: 70, rsiOS: 30, ma50: 20, ma200: 200, volThr: 120, sl: 7.0,  tp: 18.0, conv: 2 },
+  { symbol: 'AVAXUSDT',profile: 'MEDIUM', rsiOB: 70, rsiOS: 30, ma50: 20, ma200: 200, volThr: 120, sl: 7.0,  tp: 18.0, conv: 2 },
+  { symbol: 'LINKUSDT',profile: 'MEDIUM', rsiOB: 70, rsiOS: 30, ma50: 20, ma200: 200, volThr: 120, sl: 7.0,  tp: 18.0, conv: 3 },
   // High risk — Volatile Altcoins: SL 12% / TP 30% / convergence 3
-  { symbol: 'DOGEUSD',profile: 'ALTO',   rsiOB: 65, rsiOS: 35, ma50: 20, ma200: 100, volThr: 150, sl: 12.0, tp: 30.0, conv: 3 },
-  { symbol: 'LTCUSD', profile: 'ALTO',   rsiOB: 65, rsiOS: 35, ma50: 20, ma200: 100, volThr: 150, sl: 12.0, tp: 30.0, conv: 3 },
-  { symbol: 'UNIUSD', profile: 'ALTO',   rsiOB: 65, rsiOS: 35, ma50: 20, ma200: 100, volThr: 150, sl: 12.0, tp: 30.0, conv: 3 },
+  { symbol: 'DOGEUSDT',profile: 'ALTO',   rsiOB: 65, rsiOS: 35, ma50: 20, ma200: 100, volThr: 150, sl: 12.0, tp: 30.0, conv: 3 },
+  { symbol: 'LTCUSDT', profile: 'ALTO',   rsiOB: 65, rsiOS: 35, ma50: 20, ma200: 100, volThr: 150, sl: 12.0, tp: 30.0, conv: 3 },
+  { symbol: 'UNIUSDT', profile: 'ALTO',   rsiOB: 65, rsiOS: 35, ma50: 20, ma200: 100, volThr: 150, sl: 12.0, tp: 30.0, conv: 3 },
 ];
 
 async function main() {

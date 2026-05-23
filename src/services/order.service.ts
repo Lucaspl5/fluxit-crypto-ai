@@ -185,7 +185,7 @@ export class OrderService implements OnApplicationBootstrap {
     if (!order) return false;
 
     if (order.alpaca_order_id) {
-      await this.exchange.cancelOrder(order.alpaca_order_id);
+      await this.exchange.cancelOrder(order.alpaca_order_id, order.symbol);
     }
 
     await this.prisma.order.update({ where: { id: orderId }, data: { status: 'CANCELLED' } });
