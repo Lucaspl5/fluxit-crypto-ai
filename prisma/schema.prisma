@@ -1,0 +1,213 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model configuration {
+  id                   String      @id @default(cuid())
+  symbol               String      @unique
+  enabled              Boolean     @default(true)
+  risk_profile         RiskProfile @default(MEDIUM)
+  analysis_interval_min Int        @default(15)
+  rsi_period           Int         @default(14)
+  rsi_overbought       Int         @default(70)
+  rsi_oversold         Int         @default(30)
+  macd_fast_period     Int         @default(12)
+  macd_slow_period     Int         @default(26)
+  macd_signal_period   Int         @default(9)
+  ma50_period          Int         @default(50)
+  ma200_period         Int         @default(200)
+  volume_threshold_pct Decimal     @default(130)
+  required_convergence Int         @default(2)
+  stop_loss_pct        Decimal     @default(5.0)
+  take_profit_pct      Decimal     @default(12.0)
+  max_risk_per_trade   Decimal     @default(5.0)
+  trailing_stop_pct    Decimal     @default(3.0)
+  max_open_positions   Int         @default(5)
+  use_kelly            Boolean     @default(true)
+  kelly_fraction       Decimal     @default(0.5)
+  regime_filter        Boolean     @default(true)
+  use_sentiment        Boolean     @default(false)
+  created_at           DateTime    @default(now())
+  updated_at           DateTime    @updatedAt
+  signals              signal[]
+  orders               order[]
+  performances         performance[]
+
+  @@index([enabled])
+  @@index([risk_profile])
+}
+
+model signal {
+  id                    String        @id @default(cuid())
+  configuration_id      String
+  configuration         configuration @relation(fields: [configuration_id], references: [id], onDelete: Cascade)
+  timestamp             DateTime      @default(now())
+  symbol                String        @db.VarChar(10)
+  signal_type           SignalType
+  rsi                   Decimal       @db.Decimal(5, 2)
+  macd                  Decimal       @db.Decimal(10, 4)
+  macd_signal           Decimal       @db.Decimal(10, 4)
+  macd_divergence       Decimal?      @db.Decimal(10, 4)
+  ma50                  Decimal       @db.Decimal(12, 4)
+  ma200                 Decimal       @db.Decimal(12, 4)
+  current_price         Decimal       @db.Decimal(12, 4)
+  volume                BigInt
+  avg_volume            BigInt
+  volume_ratio          Decimal       @db.Decimal(8, 2)
+  convergent_indicators Int
+  convergence_score     Int
+  confidence_level      Decimal       @db.Decimal(5, 2)
+  risk_level            RiskLevel
+  reasoning             String
+  recommendation        String
+  recommended_quantity  Decimal       @default(1) @db.Decimal(18, 8)
+  telegram_message_id   Int?
+  atr                   Decimal?      @db.Decimal(10, 4)
+  bb_upper              Decimal?      @db.Decimal(12, 4)
+  bb_lower              Decimal?      @db.Decimal(12, 4)
+  sentiment_score       Decimal?      @db.Decimal(5, 2)
+  regime_bullish        Boolean?
+  tf_alignment          String?
+  created_at            DateTime      @default(now())
+  orders                order[]
+  performances          performance[]
+
+  @@index([symbol])
+  @@index([timestamp])
+  @@index([signal_type])
+}
+
+model order {
+  id                      String        @id @default(cuid())
+  configuration_id        String
+  configuration           configuration @relation(fields: [configuration_id], references: [id], onDelete: Cascade)
+  signal_id               String?
+  signal                  signal?       @relation(fields: [signal_id], references: [id], onDelete: SetNull)
+  timestamp               DateTime      @default(now())
+  symbol                  String        @db.VarChar(10)
+  order_type              OrderType
+  quantity                Decimal       @db.Decimal(18, 8)
+  price                   Decimal       @db.Decimal(12, 4)
+  stop_loss_price         Decimal?      @db.Decimal(12, 4)
+  take_profit_price       Decimal?      @db.Decimal(12, 4)
+  max_risk_eur            Decimal       @db.Decimal(10, 4)
+  status                  OrderStatus   @default(PENDING)
+  status_reason           String?
+  risk_level              RiskLevel?
+  alpaca_order_id         String?
+  user_authorization_time DateTime?
+  execution_time          DateTime?
+  notes                   String?
+  created_at              DateTime      @default(now())
+  updated_at              DateTime      @updatedAt
+  performances            performance[]
+
+  @@index([symbol])
+  @@index([status])
+  @@index([timestamp])
+}
+
+model performance {
+  id                   String            @id @default(cuid())
+  configuration_id     String
+  configuration        configuration     @relation(fields: [configuration_id], references: [id], onDelete: Cascade)
+  buy_order_id         String
+  buy_order            order             @relation(fields: [buy_order_id], references: [id], onDelete: Cascade)
+  sell_order_id        String?
+  signal_id            String?
+  signal               signal?           @relation(fields: [signal_id], references: [id], onDelete: SetNull)
+  symbol               String            @db.VarChar(10)
+  entry_price          Decimal           @db.Decimal(12, 4)
+  entry_time           DateTime
+  exit_price           Decimal?          @db.Decimal(12, 4)
+  exit_time            DateTime?
+  quantity             Decimal           @db.Decimal(18, 8)
+  profit_loss          Decimal?          @db.Decimal(12, 4)
+  profit_loss_pct      Decimal?          @db.Decimal(8, 4)
+  duration_seconds     Int?
+  status               PerformanceStatus @default(OPEN)
+  highest_price        Decimal?          @db.Decimal(12, 4)
+  trailing_stop_price  Decimal?          @db.Decimal(12, 4)
+  created_at           DateTime          @default(now())
+  updated_at           DateTime          @updatedAt
+
+  @@index([symbol])
+  @@index([status])
+  @@index([entry_time])
+}
+
+model backtest {
+  id              String           @id @default(cuid())
+  symbol          String
+  start_date      DateTime
+  end_date        DateTime
+  timeframe       String           @default("1Day")
+  strategy_params Json
+  total_trades    Int              @default(0)
+  win_rate        Decimal?         @db.Decimal(5, 2)
+  total_pl        Decimal?         @db.Decimal(12, 4)
+  max_drawdown    Decimal?         @db.Decimal(8, 4)
+  sharpe_ratio    Decimal?         @db.Decimal(8, 4)
+  created_at      DateTime         @default(now())
+  trades          backtest_trade[]
+
+  @@index([symbol])
+  @@index([created_at])
+}
+
+model backtest_trade {
+  id          String    @id @default(cuid())
+  backtest_id String
+  backtest    backtest  @relation(fields: [backtest_id], references: [id], onDelete: Cascade)
+  symbol      String
+  entry_date  DateTime
+  exit_date   DateTime
+  entry_price Decimal   @db.Decimal(12, 4)
+  exit_price  Decimal   @db.Decimal(12, 4)
+  quantity    Decimal   @db.Decimal(18, 8)
+  pl          Decimal   @db.Decimal(12, 4)
+  pl_pct      Decimal   @db.Decimal(8, 4)
+  exit_reason String
+}
+
+enum SignalType {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  PENDING
+  AUTHORIZED
+  EXECUTED
+  FAILED
+  CANCELLED
+}
+
+enum PerformanceStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum RiskProfile {
+  BAJO
+  MEDIUM
+  ALTO
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
