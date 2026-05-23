@@ -4,7 +4,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "prisma generate && prisma db push --accept-data-loss && nest build",
+    "build": "prisma generate && nest build",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "migrate": "prisma db push",
